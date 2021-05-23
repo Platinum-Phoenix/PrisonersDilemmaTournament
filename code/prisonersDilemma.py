@@ -9,8 +9,10 @@ import statistics
 import argparse
 import sys
 import json
+import hashlib
 
-parser = argparse.ArgumentParser(description="Run the Prisoner's Dilemma simulation.")
+parser = argparse.ArgumentParser(
+    description="Run the Prisoner's Dilemma simulation.")
 parser.add_argument(
     "-n",
     "--num-runs",
@@ -42,6 +44,13 @@ parser.add_argument(
     type=int,
     default=cpu_count(),
     help="Number of processes to run the simulation with. By default, this is the same as your CPU core count.",
+)
+
+parser.add_argument(
+    "--no-cache",
+    dest="use_cache",
+    action="store_true",
+    help="Disables caching"
 )
 
 
@@ -106,7 +115,7 @@ def runRound(pair):
     memoryA = None
     memoryB = None
 
-    # The games are a minimum of 200 turns long. 
+    # The games are a minimum of 200 turns long.
     # The np.log here guarantees that every turn after the 200th has an equal (low) chance of being the final turn.
     LENGTH_OF_GAME = int(
         200 - 40 * np.log(1-random.random())
@@ -191,30 +200,44 @@ def runFullPairingTournament(inFolders, outFile, summaryFile):
     print("Starting tournament, reading files from " + ", ".join(inFolders))
     scoreKeeper = {}
     STRATEGY_LIST = []
+    cache_data = []
     for inFolder in inFolders:
         for file in os.listdir(inFolder):
             if file.endswith(".py"):
-                STRATEGY_LIST.append(f"{inFolder}.{file[:-3]}")
+                mod_name = f"{inFolder}.{file[:-3]}"
+
+                with open(f"{inFolder}/{file}", "rb") as f:
+                    cache_data.append({
+                        "hash": hashlib.md5(f.read()).hexdigest(),
+                        "name": mod_name
+                    })
+
+                STRATEGY_LIST.append(mod_name)
 
     if args.strategies is not None and len(args.strategies) > 1:
-        STRATEGY_LIST = [strategy for strategy in STRATEGY_LIST if strategy in args.strategies]
+        STRATEGY_LIST=[
+            strategy for strategy in STRATEGY_LIST if strategy in args.strategies]
 
     if len(STRATEGY_LIST) < 2:
         raise ValueError('Not enough strategies!')
 
+    with open("cache.json", "w") as cache:
+        cache.write(json.dumps(cache_data))
+
     for strategy in STRATEGY_LIST:
-        scoreKeeper[strategy] = 0
+        scoreKeeper[strategy]=0
 
-    mainFile = open(outFile, "w+")
-    summaryFile = open(summaryFile, "w+")
+    mainFile=open(outFile, "w+")
+    summaryFile=open(summaryFile, "w+")
 
-    combinations = list(itertools.combinations(STRATEGY_LIST, r=2))
+    combinations=list(itertools.combinations(STRATEGY_LIST, r=2))
 
     if args.strategies is not None and len(args.strategies) == 1:
-        combinations = [pair for pair in combinations if pair[0] == args.strategies[0] or pair[1] == args.strategies[0]]
+        combinations=[pair for pair in combinations if pair[0]
+                        == args.strategies[0] or pair[1] == args.strategies[0]]
 
-    numCombinations = len(combinations)
-    allResults = []
+    numCombinations=len(combinations)
+    allResults=[]
     with Pool(args.processes) as p:
         for i, result in enumerate(
             zip(p.imap(runRounds, combinations), combinations), 1
@@ -230,9 +253,9 @@ def runFullPairingTournament(inFolders, outFile, summaryFile):
                 stdevB,
                 firstRoundHistory,
                 roundResultsStr,
-            ) = result[0]
-            (nameA, nameB) = result[1]
-            scoresList = [avgScoreA, avgScoreB]
+            )=result[0]
+            (nameA, nameB)=result[1]
+            scoresList=[avgScoreA, avgScoreB]
 
             allResults.append(
                 {
@@ -259,14 +282,15 @@ def runFullPairingTournament(inFolders, outFile, summaryFile):
     with open(RESULTS_JSON, "w+") as j:
         j.write(json.dumps(allResults))
 
-    scoresNumpy = np.zeros(len(scoreKeeper))
+    scoresNumpy=np.zeros(len(scoreKeeper))
     for i in range(len(STRATEGY_LIST)):
-        scoresNumpy[i] = scoreKeeper[STRATEGY_LIST[i]]
-    rankings = np.argsort(scoresNumpy)
-    invRankings = [len(rankings) - int(ranking) - 1 for ranking in np.argsort(rankings)]
+        scoresNumpy[i]=scoreKeeper[STRATEGY_LIST[i]]
+    rankings=np.argsort(scoresNumpy)
+    invRankings=[len(rankings) - int(ranking) -
+                   1 for ranking in np.argsort(rankings)]
 
     with open("viewer-template.html", "r+") as t:
-        jsonStrategies = [
+        jsonStrategies=[
             {
                 "name": name,
                 "rank": rank,
@@ -275,17 +299,18 @@ def runFullPairingTournament(inFolders, outFile, summaryFile):
             }
             for (name, rank, score) in zip(STRATEGY_LIST, invRankings, scoresNumpy)
         ]
-        jsonResults = json.dumps({"results": allResults, "strategies": jsonStrategies})
-        templateStr = t.read()
+        jsonResults=json.dumps(
+            {"results": allResults, "strategies": jsonStrategies})
+        templateStr=t.read()
         with open(RESULTS_HTML, "w+") as out:
             out.write(templateStr.replace("$results", jsonResults))
 
     mainFile.write("\n\nTOTAL SCORES\n")
     for rank in range(len(STRATEGY_LIST)):
-        i = rankings[-1 - rank]
-        score = scoresNumpy[i]
-        scorePer = score / (len(STRATEGY_LIST) - 1)
-        scoreLine = f"#{rank + 1}: {pad(STRATEGY_LIST[i] + ':', 16)}{score:.3f}  ({scorePer:.3f} average)\n"
+        i=rankings[-1 - rank]
+        score=scoresNumpy[i]
+        scorePer=score / (len(STRATEGY_LIST) - 1)
+        scoreLine=f"#{rank + 1}: {pad(STRATEGY_LIST[i] + ':', 16)}{score:.3f}  ({scorePer:.3f} average)\n"
         mainFile.write(scoreLine)
         summaryFile.write(scoreLine)
 
